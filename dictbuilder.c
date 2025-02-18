@@ -124,8 +124,9 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   *max_occurancies = 1;
   size_t initial_size = hashmap_count(map);
 
-  char *last = malloc(sizeof(char) * 100);
-  char *cur = malloc(sizeof(char) * 100);
+  // max possible size of a word is 49
+  char *last = malloc(sizeof(char) * 49);
+  char *cur = malloc(sizeof(char) * 49);
 
   if (!last || !cur) {
     fprintf(stderr, MEMORY_MSG);
@@ -133,14 +134,14 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   }
 
   // if no words in file, skip
-  if (fscanf(fp, " %99s", last) <= 0)
+  if (fscanf(fp, " %48s", last) <= 0)
     return 0;
 
   strclean((unsigned char *)last);
   // set first word
   set_empty_unigram(map, 25, last);
 
-  while (fscanf(fp, " %99s", cur) > 0) {
+  while (fscanf(fp, " %48s", cur) > 0) {
     strclean((unsigned char *)cur);
     if (strlen(cur) <= 0)
       continue;
@@ -179,12 +180,14 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   return hashmap_count(map) - initial_size;
 }
 
-void write_dictionary(FILE *fp, struct hashmap *map,
+void write_dictionary(FILE *fp, struct hashmap *map, unsigned min_f,
                       size_t max_unigram_occurancies) {
   // write header
   fprintf(fp,
           "dictionary=main:ru,locale=ru,description=набоковский словарь,date="
           "1739810145,version=54\n");
+  if (hashmap_count(map) == 0)
+    return;
   // division factor
   double factor = round(max_unigram_occurancies / 240.L);
   // collect and sort map keys
@@ -206,15 +209,17 @@ void write_dictionary(FILE *fp, struct hashmap *map,
   qsort(unigrams, hashmap_count(map), sizeof(Unigram *), cmp_unigram);
   // write unigrams
   const Unigram **unigrams_ptr = unigrams;
-  while (*++unigrams) {
+  do {
     const Unigram *u = *unigrams;
     unsigned f = MAX(round(u->count / factor), 1);
+    if (f < min_f && hashmap_count(u->bigrams) > 1)
+      f = MIN(f + min_f, 255);
     fprintf(fp, " word=%s,f=%d,flags=,originalFreq=%d\n", u->word, f, f);
     // collect and sort bigrams
     const Bigram **bigrams =
         malloc(sizeof(Bigram *) * (hashmap_count(u->bigrams) + 1));
 
-    if (!unigrams) {
+    if (!bigrams) {
       fprintf(stderr, MEMORY_MSG);
       exit(errno);
     }
@@ -230,16 +235,21 @@ void write_dictionary(FILE *fp, struct hashmap *map,
     // write bigrams
     size_t c = 0;
     const Bigram **bigrams_ptr = bigrams;
-    while (*++bigrams && c++ < 5) {
+    do {
       const Bigram *b = *bigrams;
       const Unigram *unigram_of_b =
           hashmap_get(map, &(Unigram){.word = b->word});
 
       unsigned f = MAX(round((b->count + unigram_of_b->count) / factor), 1);
+      if (f < min_f)
+        f = MIN(f + min_f, 255);
       fprintf(fp, "  bigram=%s,f=%d\n", b->word, f);
-    }
+
+    } while (*++bigrams && c++ < 4);
+
     free(bigrams_ptr);
-  }
+
+  } while (*++unigrams);
 
   free(unigrams_ptr);
 }
@@ -248,18 +258,27 @@ void write_dictionary(FILE *fp, struct hashmap *map,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr,
-            "Usage: %s <file_1> <file_2> <file_3> ... <file_n>\n"
-            "Files must be utf8 encoded\n",
-            *argv);
+    fprintf(
+        stderr,
+        "\nUsage: %s [Options] <file_1> <file_2> <file_3> ... <file_n>\n\n"
+        "Files must be utf8 encoded\n\n"
+        "Options:\n\n"
+        "--minf           minimal f value in dictionary(0-255, default: 150)\n",
+        *argv);
     return errno;
   }
 
+  // create word map with occurancies
   struct hashmap *map = hashmap_new(sizeof(Unigram), 5000, 0, 0, unigram_hash,
                                     unigram_compare, unigram_free, NULL);
   size_t max_occurancies;
+  unsigned min_f = 150;
 
-  // create word map with occurancies
+  if (strcmp("--minf", argv[1]) == 0 && argc > 2) {
+    sscanf(argv[2], "%u", &min_f);
+    argv += 2;
+  }
+
   while (*++argv) {
     FILE *fp = fopen(*argv, "r");
 
@@ -273,7 +292,7 @@ int main(int argc, char **argv) {
     fclose(fp);
   }
   // print them to stdout
-  write_dictionary(stdout, map, max_occurancies);
+  write_dictionary(stdout, map, MIN(min_f, 255), max_occurancies);
   hashmap_free(map);
 
   return 0;
