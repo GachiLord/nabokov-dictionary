@@ -8,71 +8,73 @@
 // macro
 
 #define MEMORY_MSG "Stop being poor! Buy more memory lol\n"
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 // map contents
 
 typedef struct {
   char *word;
   long count;
-} Next;
+} Bigram;
 
 typedef struct {
   char *word;
   long count;
-  struct hashmap *next;
-} Word;
+  struct hashmap *bigrams;
+} Unigram;
 
 // map methods
 
-int word_compare(const void *a, const void *b, void *udata) {
-  const Word *ua = a;
-  const Word *ub = b;
+int unigram_compare(const void *a, const void *b, void *udata) {
+  const Unigram *ua = a;
+  const Unigram *ub = b;
   return strcmp(ua->word, ub->word);
 }
 
-uint64_t word_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-  const Word *word = item;
-  return hashmap_sip(word->word, strlen(word->word), seed0, seed1);
+uint64_t unigram_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+  const Unigram *unigram = item;
+  return hashmap_sip(unigram->word, strlen(unigram->word), seed0, seed1);
 }
 
-void word_free(void *item) {
-  const Word *word = item;
-  free(word->word);
-  hashmap_free(word->next);
+void unigram_free(void *item) {
+  const Unigram *unigram = item;
+  free(unigram->word);
+  hashmap_free(unigram->bigrams);
 }
 
-int next_compare(const void *a, const void *b, void *udata) {
-  const Next *ua = a;
-  const Next *ub = b;
+int digram_compare(const void *a, const void *b, void *udata) {
+  const Bigram *ua = a;
+  const Bigram *ub = b;
   return strcmp(ua->word, ub->word);
 }
 
-uint64_t next_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-  const Next *word = item;
-  return hashmap_sip(word->word, strlen(word->word), seed0, seed1);
+uint64_t digram_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+  const Bigram *digram = item;
+  return hashmap_sip(digram->word, strlen(digram->word), seed0, seed1);
 }
 
-void next_free(void *item) {
-  const Word *next = item;
-  free(next->word);
+void digram_free(void *item) {
+  const Bigram *digram = item;
+  free(digram->word);
 }
 
-#define set_empty_word(map, cap, word_to_set)                                  \
-  hashmap_set(map,                                                             \
-              &(Word){.word = strdup(word_to_set),                             \
-                      .count = 1,                                              \
-                      .next = hashmap_new(sizeof(Next), 50, 0, 0, next_hash,   \
-                                          next_compare, next_free, NULL)})
+#define set_empty_unigram(map, cap, word_to_set)                               \
+  hashmap_set(map, &(Unigram){.word = strdup(word_to_set),                     \
+                              .count = 1,                                      \
+                              .bigrams = hashmap_new(                          \
+                                  sizeof(Bigram), 50, 0, 0, digram_hash,       \
+                                  digram_compare, digram_free, NULL)})
 
-static int cmp_next(const void *p1, const void *p2) {
-  Next *const *ua = p1;
-  Next *const *ub = p2;
+static int cmp_unigram(const void *p1, const void *p2) {
+  Unigram *const *ua = p1;
+  Unigram *const *ub = p2;
   return (*ub)->count - (*ua)->count;
 }
 
-static int cmp_word(const void *p1, const void *p2) {
-  Word *const *ua = p1;
-  Word *const *ub = p2;
+static int cmp_bigram(const void *p1, const void *p2) {
+  Bigram *const *ua = p1;
+  Bigram *const *ub = p2;
   return (*ub)->count - (*ua)->count;
 }
 
@@ -119,136 +121,127 @@ void strclean(unsigned char *src) {
 // dict functions
 
 size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
-  *max_occurancies = 0;
+  *max_occurancies = 1;
   size_t initial_size = hashmap_count(map);
 
-  char *last_word = malloc(sizeof(char) * 100);
-  char *cur_word = malloc(sizeof(char) * 100);
+  char *last = malloc(sizeof(char) * 100);
+  char *cur = malloc(sizeof(char) * 100);
 
-  if (!last_word || !cur_word) {
+  if (!last || !cur) {
     fprintf(stderr, MEMORY_MSG);
     exit(errno);
   }
 
   // if no words in file, skip
-  if (fscanf(fp, " %99s", last_word) <= 0)
+  if (fscanf(fp, " %99s", last) <= 0)
     return 0;
 
-  strclean((unsigned char *)last_word);
+  strclean((unsigned char *)last);
   // set first word
-  set_empty_word(map, 25, last_word);
+  set_empty_unigram(map, 25, last);
 
-  while (fscanf(fp, " %99s", cur_word) > 0) {
-    strclean((unsigned char *)cur_word);
-    if (strlen(cur_word) <= 0)
+  while (fscanf(fp, " %99s", cur) > 0) {
+    strclean((unsigned char *)cur);
+    if (strlen(cur) <= 0)
       continue;
 
-    Word *word = (Word *)hashmap_get(map, &(Word){.word = last_word});
-    Next *next = (Next *)hashmap_get(word->next, &(Next){.word = cur_word});
+    const Unigram *last_unigram = hashmap_get(map, &(Unigram){.word = last});
+    // update digram's counter
+    Bigram *digram =
+        (Bigram *)hashmap_get(last_unigram->bigrams, &(Bigram){.word = cur});
 
-    if (next) {
-      if (next->count++ > *max_occurancies)
-        *max_occurancies = next->count;
+    if (digram) {
+      digram->count++;
     } else {
-      hashmap_set(word->next, &(Next){.word = strdup(cur_word), .count = 1});
+      hashmap_set(last_unigram->bigrams,
+                  &(Bigram){.word = strdup(cur), .count = 1});
+    }
+    // update unigram counter of the cur
+    Unigram *cur_unigram = (Unigram *)hashmap_get(map, &(Unigram){.word = cur});
+
+    if (cur_unigram) {
+      if (cur_unigram->count++ > *max_occurancies) {
+        *max_occurancies = cur_unigram->count;
+      }
+    } else {
+      set_empty_unigram(map, 25, cur);
     }
 
-    Word *next_word = (Word *)hashmap_get(map, &(Word){.word = cur_word});
-    if (next_word) {
-      if (next_word->count++ > *max_occurancies)
-        *max_occurancies = next_word->count;
-    } else {
-      set_empty_word(map, 25, cur_word);
-    }
-
-    char *tmp = last_word;
-    last_word = cur_word;
-    cur_word = tmp;
+    // swap pointers
+    char *tmp = last;
+    last = cur;
+    cur = tmp;
   }
 
-  free(last_word);
-  free(cur_word);
+  free(last);
+  free(cur);
 
   return hashmap_count(map) - initial_size;
 }
 
-void write_dictionary(FILE *fp, struct hashmap *map, size_t max_occurancies) {
+void write_dictionary(FILE *fp, struct hashmap *map,
+                      size_t max_unigram_occurancies) {
   // write header
   fprintf(fp,
           "dictionary=main:ru,locale=ru,description=набоковский словарь,date="
           "1739810145,version=54\n");
   // division factor
-  double factor = floor(max_occurancies / 240.L);
-  // collect the map keys
-  size_t len = hashmap_count(map) + 1;
-  const Word **wordlist = malloc(sizeof(Word *) * len);
-  const Word **wordlist_ptr = wordlist;
+  double factor = round(max_unigram_occurancies / 240.L);
+  // collect and sort map keys
+  const Unigram **unigrams =
+      malloc(sizeof(Unigram *) * (hashmap_count(map) + 1));
 
-  if (!wordlist) {
+  if (!unigrams) {
     fprintf(stderr, MEMORY_MSG);
     exit(errno);
   }
 
-  wordlist[len - 1] = NULL;
-
   size_t iter = 0;
-  size_t i = 0;
   void *item;
-
-  while (hashmap_iter(map, &iter, &item)) {
-    wordlist[i++] = (const Word *)item;
+  for (size_t i = 0; hashmap_iter(map, &iter, &item); i++) {
+    const Unigram *unigram = item;
+    unigrams[i] = unigram;
   }
-  // sort by occurancies
-  qsort(wordlist, len - 1, sizeof(Word *), cmp_word);
-  // convert maps to word sequnces
-  while (*++wordlist) {
-    // collect words
-    size_t max_occurancies = 0;
-    const Word *word = *wordlist;
-    size_t len = hashmap_count(word->next) + 1;
-    const Next **top_words = malloc(sizeof(Next *) * len);
-    const Next **top_words_ptr = top_words;
+  unigrams[hashmap_count(map)] = NULL;
+  qsort(unigrams, hashmap_count(map), sizeof(Unigram *), cmp_unigram);
+  // write unigrams
+  const Unigram **unigrams_ptr = unigrams;
+  while (*++unigrams) {
+    const Unigram *u = *unigrams;
+    unsigned f = MAX(round(u->count / factor), 1);
+    fprintf(fp, " word=%s,f=%d,flags=,originalFreq=%d\n", u->word, f, f);
+    // collect and sort bigrams
+    const Bigram **bigrams =
+        malloc(sizeof(Bigram *) * (hashmap_count(u->bigrams) + 1));
 
-    if (!top_words) {
+    if (!unigrams) {
       fprintf(stderr, MEMORY_MSG);
       exit(errno);
     }
 
-    top_words[len - 1] = NULL;
-
     size_t iter = 0;
-    size_t i = 0;
     void *item;
-
-    while (hashmap_iter(word->next, &iter, &item)) {
-      const Next *next = item;
-
-      if (next->count > max_occurancies)
-        max_occurancies = next->count;
-
-      top_words[i] = next;
-      i++;
+    for (size_t i = 0; hashmap_iter(u->bigrams, &iter, &item); i++) {
+      const Bigram *bigram = item;
+      bigrams[i] = bigram;
     }
-    // sort words by count
-    if (len > 1) {
-      qsort(top_words, len - 1, sizeof(Next *), cmp_next);
+    bigrams[hashmap_count(u->bigrams)] = NULL;
+    qsort(bigrams, hashmap_count(u->bigrams), sizeof(Bigram *), cmp_bigram);
+    // write bigrams
+    size_t c = 0;
+    const Bigram **bigrams_ptr = bigrams;
+    while (*++bigrams && c++ < 5) {
+      const Bigram *b = *bigrams;
+      const Unigram *unigram_of_b =
+          hashmap_get(map, &(Unigram){.word = b->word});
+
+      unsigned f = MAX(round((b->count + unigram_of_b->count) / factor), 1);
+      fprintf(fp, "  bigram=%s,f=%d\n", b->word, f);
     }
-
-    unsigned f = round(word->count / factor) + 1;
-    fprintf(fp, " word=%s,f=%d,flags=,originalFreq=%d\n", word->word, f, f);
-
-    double factor = max_occurancies > 255 ? max_occurancies / 255L : 1L;
-    unsigned next_f = floor((*top_words)->count / factor) + f;
-    int c = 0;
-    while (*++top_words && c < 10) {
-      fprintf(fp, "  bigram=%s,f=%d\n", (*top_words)->word,
-              next_f > 255 ? 255 : next_f);
-      c++;
-    }
-
-    free(top_words_ptr);
+    free(bigrams_ptr);
   }
-  free(wordlist_ptr);
+
+  free(unigrams_ptr);
 }
 
 // program
@@ -262,8 +255,8 @@ int main(int argc, char **argv) {
     return errno;
   }
 
-  struct hashmap *map = hashmap_new(sizeof(Word), 5000, 0, 0, word_hash,
-                                    word_compare, word_free, NULL);
+  struct hashmap *map = hashmap_new(sizeof(Unigram), 5000, 0, 0, unigram_hash,
+                                    unigram_compare, unigram_free, NULL);
   size_t max_occurancies;
 
   // create word map with occurancies

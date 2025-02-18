@@ -8,7 +8,7 @@ endif
 
 all: dictbuilder
 
-dictbuilder: dictbuilder.c ./hashmap.c/hashmap.h
+dictbuilder: dictbuilder.c ./hashmap.c/hashmap.h ./hashmap.c/hashmap.c
 	$(CC) ./hashmap.c/hashmap.c dictbuilder.c -o dictbuilder -lm $(CFLAGS)
 clean:
 	rm dictbuilder -f
