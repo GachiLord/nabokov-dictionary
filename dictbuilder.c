@@ -59,12 +59,41 @@ void bigram_free(void *item) {
   free(digram->word);
 }
 
-#define set_empty_unigram(map, cap, word_to_set)                               \
-  hashmap_set(map, &(Unigram){.word = strdup(word_to_set),                     \
-                              .count = 1,                                      \
-                              .bigrams = hashmap_new(                          \
-                                  sizeof(Bigram), 50, 0, 0, bigram_hash,       \
-                                  bigram_compare, bigram_free, NULL)})
+#define oom_handler(ptr)                                                       \
+  do {                                                                         \
+    if (!ptr) {                                                                \
+      fprintf(stderr, MEMORY_MSG);                                             \
+      exit(errno);                                                             \
+    }                                                                          \
+  } while (0)
+
+#define hashmap_oom_handler(map)                                               \
+  do {                                                                         \
+    if (hashmap_oom(map))                                                      \
+      oom_handler(NULL);                                                       \
+  } while (0)
+
+#define set_empty_bigram(map, word_to_copy)                                    \
+  do {                                                                         \
+    char *cpy = strdup(word_to_copy);                                          \
+    oom_handler(cpy);                                                          \
+                                                                               \
+    hashmap_set(map, &(Bigram){.word = cpy, .count = 1});                      \
+    hashmap_oom_handler(map);                                                  \
+  } while (0)
+
+#define set_empty_unigram(map, word_to_copy)                                   \
+  do {                                                                         \
+    char *cpy = strdup(word_to_copy);                                          \
+    oom_handler(cpy);                                                          \
+                                                                               \
+    void *bigrams = hashmap_new(sizeof(Bigram), 25, 0, 0, bigram_hash,         \
+                                bigram_compare, bigram_free, NULL);            \
+    oom_handler(bigrams);                                                      \
+                                                                               \
+    hashmap_set(map, &(Unigram){.word = cpy, .count = 1, .bigrams = bigrams}); \
+    hashmap_oom_handler(map);                                                  \
+  } while (0)
 
 static int cmp_unigram(const void *p1, const void *p2) {
   Unigram *const *ua = p1;
@@ -128,10 +157,8 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   char *last = malloc(sizeof(char) * 49);
   char *cur = malloc(sizeof(char) * 49);
 
-  if (!last || !cur) {
-    fprintf(stderr, MEMORY_MSG);
-    exit(errno);
-  }
+  oom_handler(last);
+  oom_handler(cur);
 
   // if no words in file, skip
   if (fscanf(fp, " %48s", last) <= 0)
@@ -143,7 +170,7 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   if (last_unigram)
     last_unigram->count++;
   else
-    set_empty_unigram(map, 25, last);
+    set_empty_unigram(map, last);
 
   while (fscanf(fp, " %48s", cur) > 0) {
     strclean((unsigned char *)cur);
@@ -151,15 +178,14 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
       continue;
 
     const Unigram *last_unigram = hashmap_get(map, &(Unigram){.word = last});
-    // update digram's counter
-    Bigram *digram =
+    // update bigram's counter
+    Bigram *bigram =
         (Bigram *)hashmap_get(last_unigram->bigrams, &(Bigram){.word = cur});
 
-    if (digram) {
-      digram->count++;
+    if (bigram) {
+      bigram->count++;
     } else {
-      hashmap_set(last_unigram->bigrams,
-                  &(Bigram){.word = strdup(cur), .count = 1});
+      set_empty_bigram(last_unigram->bigrams, cur);
     }
     // update unigram counter of the cur
     Unigram *cur_unigram = (Unigram *)hashmap_get(map, &(Unigram){.word = cur});
@@ -169,7 +195,7 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
         *max_occurancies = cur_unigram->count;
       }
     } else {
-      set_empty_unigram(map, 25, cur);
+      set_empty_unigram(map, cur);
     }
 
     // swap pointers
@@ -199,11 +225,7 @@ void write_dictionary(FILE *fp, struct hashmap *map, unsigned min_f,
   // collect and sort map keys
   const Unigram **unigrams =
       malloc(sizeof(Unigram *) * (hashmap_count(map) + 1));
-
-  if (!unigrams) {
-    fprintf(stderr, MEMORY_MSG);
-    exit(errno);
-  }
+  oom_handler(unigrams);
 
   size_t iter = 0;
   void *item;
@@ -221,14 +243,14 @@ void write_dictionary(FILE *fp, struct hashmap *map, unsigned min_f,
     if (f < min_f && hashmap_count(u->bigrams) > 1)
       f = MIN(f + min_f, 255);
     fprintf(fp, " word=%s,f=%d,flags=,originalFreq=%d\n", u->word, f, f);
+    // skip if no digrams
+    if (hashmap_count(u->bigrams) == 0)
+      continue;
     // collect and sort bigrams
     const Bigram **bigrams =
         malloc(sizeof(Bigram *) * (hashmap_count(u->bigrams) + 1));
 
-    if (!bigrams) {
-      fprintf(stderr, MEMORY_MSG);
-      exit(errno);
-    }
+    oom_handler(bigrams);
 
     size_t iter = 0;
     void *item;
@@ -260,7 +282,7 @@ void write_dictionary(FILE *fp, struct hashmap *map, unsigned min_f,
   free(unigrams_ptr);
 }
 
-// program
+// util
 
 enum PREV_ARG { FILENAME, MIN_F, LOCALE };
 
