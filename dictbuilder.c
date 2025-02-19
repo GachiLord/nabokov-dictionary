@@ -153,15 +153,15 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   *max_occurancies = 1;
   size_t initial_size = hashmap_count(map);
 
-  // max possible size of a word is 49
-  char *last = malloc(sizeof(char) * 49);
-  char *cur = malloc(sizeof(char) * 49);
+  // max possible size of a word is 47
+  char *last = malloc(sizeof(char) * 48);
+  char *cur = malloc(sizeof(char) * 48);
 
   oom_handler(last);
   oom_handler(cur);
 
   // if no words in file, skip
-  if (fscanf(fp, " %48s", last) <= 0)
+  if (fscanf(fp, " %47s", last) <= 0)
     goto cleanup;
 
   strclean((unsigned char *)last);
@@ -172,7 +172,7 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
   else
     set_empty_unigram(map, last);
 
-  while (fscanf(fp, " %48s", cur) > 0) {
+  while (fscanf(fp, " %47s", cur) > 0) {
     strclean((unsigned char *)cur);
     if (strlen(cur) <= 0)
       continue;
