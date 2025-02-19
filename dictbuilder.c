@@ -186,11 +186,12 @@ cleanup:
 }
 
 void write_dictionary(FILE *fp, struct hashmap *map, unsigned min_f,
-                      size_t max_unigram_occurancies) {
+                      char *locale, size_t max_unigram_occurancies) {
   // write header
   fprintf(fp,
-          "dictionary=main:ru,locale=ru,description=набоковский словарь,date="
-          "1739810145,version=54\n");
+          "dictionary=main:%s,locale=%s,description=nabokov's dictionary,date="
+          "1739810145,version=54\n",
+          locale, locale);
   if (hashmap_count(map) == 0)
     return;
   // division factor
@@ -261,34 +262,67 @@ void write_dictionary(FILE *fp, struct hashmap *map, unsigned min_f,
 
 // program
 
+enum PREV_ARG { FILENAME, MIN_F, LOCALE };
+
+void usage() {
+  fprintf(stderr,
+          "\nUsage: dictbuilder [Options] <file_1> <file_2> <file_3> ... "
+          "<file_n>\n\n"
+          "Files must be in English or/and Russian.\n"
+          "The util supports only "
+          "utf-8 and ascii encodings.\n\n"
+          "Options:\n\n"
+          "--minf           average minimal f value in dictionary(0-255, "
+          "default: 150)\n"
+          "--locale         locale to use in the header(default: ru)\n");
+  exit(errno);
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(
-        stderr,
-        "\nUsage: %s [Options] <file_1> <file_2> <file_3> ... <file_n>\n\n"
-        "Files must be utf8 encoded\n\n"
-        "Options:\n\n"
-        "--minf           minimal f value in dictionary(0-255, default: 150)\n",
-        *argv);
-    return errno;
+    usage();
   }
 
   // create word map with occurancies
   struct hashmap *map = hashmap_new(sizeof(Unigram), 5000, 0, 0, unigram_hash,
                                     unigram_compare, unigram_free, NULL);
+
   size_t max_occurancies;
   unsigned min_f = 150;
+  char *locale = "ru";
 
-  if (strcmp("--minf", argv[1]) == 0 && argc > 2) {
-    sscanf(argv[2], "%u", &min_f);
-    argv += 2;
-  }
+  int arg_type = FILENAME;
 
   while (*++argv) {
+    // parse options
+    if (arg_type == MIN_F) {
+      if (sscanf(*argv, "%u", &min_f) <= 0)
+        usage();
+      if (min_f > 255)
+        usage();
+
+      arg_type = FILENAME;
+      continue;
+    }
+    if (arg_type == LOCALE) {
+      locale = *argv;
+      arg_type = FILENAME;
+      continue;
+    }
+    if (strcmp(*argv, "--minf") == 0) {
+      arg_type = MIN_F;
+      continue;
+    } else if (strcmp(*argv, "--locale") == 0) {
+      arg_type = LOCALE;
+      continue;
+    } else {
+      arg_type = FILENAME;
+    }
+    // build dict
     FILE *fp = fopen(*argv, "r");
 
     if (fp == NULL) {
-      fprintf(stderr, "No such file %s\n", *argv);
+      fprintf(stderr, "No such file '%s'\n", *argv);
       return errno;
     }
 
@@ -297,7 +331,7 @@ int main(int argc, char **argv) {
     fclose(fp);
   }
   // print them to stdout
-  write_dictionary(stdout, map, MIN(min_f, 255), max_occurancies);
+  write_dictionary(stdout, map, min_f, locale, max_occurancies);
   hashmap_free(map);
 
   return 0;
