@@ -43,18 +43,18 @@ void unigram_free(void *item) {
   hashmap_free(unigram->bigrams);
 }
 
-int digram_compare(const void *a, const void *b, void *udata) {
+int bigram_compare(const void *a, const void *b, void *udata) {
   const Bigram *ua = a;
   const Bigram *ub = b;
   return strcmp(ua->word, ub->word);
 }
 
-uint64_t digram_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+uint64_t bigram_hash(const void *item, uint64_t seed0, uint64_t seed1) {
   const Bigram *digram = item;
   return hashmap_sip(digram->word, strlen(digram->word), seed0, seed1);
 }
 
-void digram_free(void *item) {
+void bigram_free(void *item) {
   const Bigram *digram = item;
   free(digram->word);
 }
@@ -63,8 +63,8 @@ void digram_free(void *item) {
   hashmap_set(map, &(Unigram){.word = strdup(word_to_set),                     \
                               .count = 1,                                      \
                               .bigrams = hashmap_new(                          \
-                                  sizeof(Bigram), 50, 0, 0, digram_hash,       \
-                                  digram_compare, digram_free, NULL)})
+                                  sizeof(Bigram), 50, 0, 0, bigram_hash,       \
+                                  bigram_compare, bigram_free, NULL)})
 
 static int cmp_unigram(const void *p1, const void *p2) {
   Unigram *const *ua = p1;
@@ -135,11 +135,15 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
 
   // if no words in file, skip
   if (fscanf(fp, " %48s", last) <= 0)
-    return 0;
+    goto cleanup;
 
   strclean((unsigned char *)last);
   // set first word
-  set_empty_unigram(map, 25, last);
+  Unigram *last_unigram = (Unigram *)hashmap_get(map, &(Unigram){.word = last});
+  if (last_unigram)
+    last_unigram->count++;
+  else
+    set_empty_unigram(map, 25, last);
 
   while (fscanf(fp, " %48s", cur) > 0) {
     strclean((unsigned char *)cur);
@@ -174,6 +178,7 @@ size_t fill_wordmap(FILE *fp, struct hashmap *map, size_t *max_occurancies) {
     cur = tmp;
   }
 
+cleanup:
   free(last);
   free(cur);
 
