@@ -1,4 +1,4 @@
-dictionary=main:ru,locale=ru,description=nabokov's dictionary,date=1739810145,version=54
+dictionary=main:en,locale=en,description=nabokov's dictionary,date=1739810145,version=54
  word=the,f=239,flags=,originalFreq=239
   bigram=same,f=156
   bigram=other,f=159
