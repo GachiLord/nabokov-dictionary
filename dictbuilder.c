@@ -15,12 +15,12 @@
 
 typedef struct {
   char *word;
-  long count;
+  size_t count;
 } Bigram;
 
 typedef struct {
   char *word;
-  long count;
+  size_t count;
   struct hashmap *bigrams;
 } Unigram;
 
@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
   struct hashmap *map = hashmap_new(sizeof(Unigram), 5000, 0, 0, unigram_hash,
                                     unigram_compare, unigram_free, NULL);
 
-  size_t max_occurancies;
+  size_t max_occurancies = 1;
   unsigned min_f = 150;
   char *locale = "ru";
 

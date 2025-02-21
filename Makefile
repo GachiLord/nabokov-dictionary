@@ -1,7 +1,8 @@
 CC ?= gcc
+CFLAGS = -Wall -Wextra -Wno-unused-parameter
 
 ifeq ($(DEBUG), 1)
-	CFLAGS += -fsanitize=address -g
+	CFLAGS += -fsanitize=address,undefined -g
 else
 	CFLAGS += -O3
 endif
